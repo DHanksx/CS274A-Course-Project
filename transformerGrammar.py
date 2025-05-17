@@ -67,7 +67,128 @@ def mapping_function(example: dict) -> dict:
     """
 
     """YOUR CODE HERE"""
-    util.raiseNotDefined()
+    # util.raiseNotDefined()
+    actions = example["actions"]
+
+    if not (actions[0] == "<s>" and actions[-1] == "</s>"):
+        raise InvalidTreeError("Must start with <s> and end with </s>")
+
+    if not any(tok.startswith("(") for tok in actions) or not any(tok.endswith(")") for tok in actions):
+        raise InvalidTreeError("Must contain nonterminals")
+
+    if sum(1 for tok in actions if tok.startswith("(")) != sum(1 for tok in actions if tok.endswith(")")):
+        raise InvalidTreeError("Unbalanced nonterminals")
+    inputs = []
+    labels = []
+    position_ids = []
+
+    stack = []
+    span_stack = []
+    span_map = {}
+    cnt2_indices = set()
+
+    depth = 0
+
+    for token in actions:
+        inputs.append(token)
+
+        if token == "<s>" or token == "</s>":
+            labels.append(token)
+            position_ids.append(0)
+
+        elif token.startswith("("):  # ONT
+            stack.append(token)
+            span_stack.append(len(inputs) - 1)
+            depth += 1
+            labels.append(token)
+            position_ids.append(depth - 1)
+
+        elif token.endswith(")"):  # CNT1
+            if not stack:
+                raise InvalidTreeError("Unmatched closing NT")
+            open_token = stack.pop()
+            if open_token[1:] != token[:-1]:
+                raise InvalidTreeError(f"Mismatched {open_token} vs {token}")
+            start = span_stack.pop()
+            end = len(inputs) - 1
+            span_map[end] = (start, end)
+            if end - start <= 1:
+                raise InvalidTreeError("Empty constituent")
+            labels.append(token)
+            position_ids.append(depth - 1)
+
+            inputs.append(token)
+            labels.append("<pad>")
+            position_ids.append(depth - 1)
+            span_map[len(inputs) - 1] = (start, end)
+            cnt2_indices.add(len(inputs) - 1)  
+
+            depth -= 1
+        else:  # Terminal (T)
+            if not stack:
+                raise InvalidTreeError("Terminal token outside of any constituent")
+            labels.append(token)
+            position_ids.append(depth)
+
+    if stack:
+        raise InvalidTreeError("Unclosed constituents")
+
+    #attention mask
+    seq_len = len(inputs)
+    attn_mask = torch.zeros((seq_len, seq_len), dtype=torch.float)
+
+    S = []
+    
+    def token_type(t, idx):
+        if t == "<s>":
+            return "ONT"
+        elif t == "</s>":
+            return "EOS"
+        elif t.startswith("("):
+            return "ONT"
+        elif t.endswith(")"):
+            if idx in cnt2_indices:
+                return "CNT2"
+            else:
+                return "CNT1"
+        else:
+            return "T"
+
+    for i in range(seq_len):
+        t = inputs[i]
+        tp = token_type(t, i)
+
+        attn_mask[i][i] = 1.0 
+
+        if tp == "CNT1":
+            j = i
+            while True:
+                if not S:
+                    raise InvalidTreeError("Empty stack during CNT1 compose")
+                if token_type(inputs[j], j) == "ONT":
+                    break
+                attn_mask[i][j] = 1.0
+                j = S.pop()
+                if token_type(inputs[j], j) == "ONT":
+                    break
+            attn_mask[i][j] = 1.0   
+            S.append(i) 
+
+        else:
+            if tp != "CNT2":
+                S.append(i)
+            for j in S:
+                attn_mask[i][j] = 1.0
+
+    attn_mask[-1] = 0.0
+    return {
+        "inputs": inputs,
+        "labels": labels,
+        "position_ids": position_ids,
+        "attention_mask": attn_mask
+    }
+
+    
 
 
 def get_trainer(
@@ -132,8 +253,32 @@ def get_trainer(
 
         return batch
 
-    """YOUR CODE HERE"""
-    util.raiseNotDefined()
+        # """YOUR CODE HERE"""
+        # util.raiseNotDefined()
+
+    training_args = TrainingArguments(
+        output_dir="./results",
+        learning_rate=5e-4,
+        per_device_train_batch_size=16,
+        num_train_epochs=6,
+        weight_decay=0.01,
+        logging_dir="./logs",
+        logging_steps=50,
+        save_strategy="no",  # avoid saving checkpoints to save time
+        report_to="none",    # disable WandB or other logging integrations
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        tokenizer=tokenizer,
+        data_collator=data_collator,
+    )
+
+    return trainer
+
+   
 
 
 def main():

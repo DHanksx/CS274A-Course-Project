@@ -56,7 +56,33 @@ def clean_vocab(vocab: Dict[str, int], merges: List[Tuple[str, str]]):
     """
 
     """YOUR CODE HERE"""
-    util.raiseNotDefined()
+    # util.raiseNotDefined()
+    import re
+
+    digit_pattern = re.compile(r'\d{2,}')  
+
+    tokens_to_remove = {token for token in vocab if digit_pattern.search(token)}
+
+
+    def is_bad_merge(a, b):
+        return (
+            digit_pattern.search(a) or
+            digit_pattern.search(b) or
+            (a[-1].isdigit() and b[0].isdigit())
+        )
+
+    merges[:] = [
+        (a, b) for (a, b) in merges
+        if not is_bad_merge(a, b)
+    ]
+
+    for token in tokens_to_remove:
+        del vocab[token]
+
+    sorted_vocab = sorted(vocab.items(), key=lambda x: x[1])
+    vocab.clear()
+    for new_id, (token, _) in enumerate(sorted_vocab):
+        vocab[token] = new_id
 
 
 if __name__ == '__main__':

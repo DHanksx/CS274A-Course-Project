@@ -37,9 +37,32 @@ def get_topic_classification_pipeline() -> Callable[[str], dict]:
         >>> result = func("Would the US constitution be changed if the admendment received 2/3 of the popular vote?")
         {"label": "Politics & Government", "score": 0.9999999403953552}
     """
-    pipe = pipeline(model="cointegrated/rubert-tiny-sentiment-balanced")
+    # pipe = pipeline(model="cointegrated/rubert-tiny-sentiment-balanced")
+    # def func(text: str) -> dict:
+    #     return pipe(text)[0]
+    # return func
+    pipe = pipeline("text-classification", model="fabriceyhc/bert-base-uncased-yahoo_answers_topics")
+    
+    label_map = {
+        "LABEL_0": "Society & Culture",
+        "LABEL_1": "Science & Mathematics",
+        "LABEL_2": "Health",
+        "LABEL_3": "Education & Reference",
+        "LABEL_4": "Computers & Internet",
+        "LABEL_5": "Sports",
+        "LABEL_6": "Business & Finance",
+        "LABEL_7": "Entertainment & Music",
+        "LABEL_8": "Family & Relationships",
+        "LABEL_9": "Politics & Government"
+    }
+
     def func(text: str) -> dict:
-        return pipe(text)[0]
+        raw = pipe(text)[0]
+        return {
+            "label": label_map.get(raw["label"], raw["label"]),
+            "score": raw["score"]
+        }
+
     return func
 
 
